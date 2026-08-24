@@ -30,16 +30,39 @@ client ──/v1/chat/completions──▶  RTS proxy (:8090)
     5. ANSWER    ── main model reasons over the ~300-char extract, with [n] cites
 ```
 
-**Validated end to end** on 120 TriviaQA questions: closed-book **70.8 %** →
-full stack **87.5 %** (+16.7 pts). Control arm — thinking *without* search — scored
-72.5 %, i.e. **+1.7 pts for 4× the latency**. Search fixes knowledge; thinking fixes
-reasoning; the proxy routes them independently. Full table in `docs/MEASUREMENTS.md`.
+**Validated end to end** on 120 TriviaQA questions, four arms, run sequentially:
 
-**Why two models.** On this hardware a sparse MoE (Qwen3.6-35B-A3B) prefills at
-**938 t/s** while a dense 27B does **253 t/s**. Retrieval is a *reading* job, answering
-is a *reasoning* job — so the MoE reads and the dense model thinks.
+| arm | accuracy | median latency |
+|---|---|---|
+| closed-book | 73.3 % | 0.6 s |
+| closed-book + thinking (control) | 75.0 % | 2.3 s |
+| single-model search stack (q38 does its own extraction) | 86.7 % | 27.3 s |
+| **this stack** (A3B extracts → q38 answers) | **91.7 %** | **11.8 s** |
 
-Measured on a multi-hop benchmark with same-shape distractors:
+**+18.4 points from retrieval.** The thinking-only control is what makes that
+readable: deliberation *without* search bought **+1.7 points for 4× the latency**,
+because factual recall is a knowledge gap and thinking cannot invent facts. Search
+fixes knowledge, thinking fixes reasoning, and the proxy routes them independently.
+Full tables and the grading method in [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md).
+
+**Why two models — it is faster *and* more accurate.** Against the same stack with
+q38 doing its own extraction, the split is **2.3× faster and +5.0 points better**.
+Speed is the expected half: a 3B-active MoE prefills at **938 t/s** where the dense
+27B does **253 t/s**, and extraction is the token-heavy call (it eats all six
+documents; the answer call sees only the extracted spans).
+
+Accuracy is the surprising half, and the mechanism is concrete — over the 120,
+q38-self-extracting refused its own retrieved evidence **26 times vs 11**, and cited
+a source on only 84/120 vs 101/120. It reads a raw six-document search dump as a
+question about *trustworthiness* and falls back to memory; a small extractor whose
+only job is copying spans just returns the span. All 9 questions this stack wins and
+the single-model stack loses are that pattern, with the fact verbatim in the results.
+
+Specialising the extractor is not just a cheaper way to do the same work — it is a
+**more faithful** one, because the answerer never sees the noise that triggers its
+own caution.
+
+The same split on a multi-hop benchmark with same-shape distractors:
 
 | context | single-model RTS | **cross-model RTS** | speedup |
 |---|---|---|---|
@@ -47,8 +70,8 @@ Measured on a multi-hop benchmark with same-shape distractors:
 | 8.2 k | 35.4 s | 11.2 s | **3.2×** |
 | 16 k | 69.1 s | 20.3 s | **3.4×** |
 
-Accuracy did not drop — it rose slightly (61/72 → 66/72), because the MoE is the
-better *copier*. The extract is ~0.3 % of the input, so the answering call is nearly free.
+Accuracy rose there too (61/72 → 66/72). The extract is ~0.3 % of the input, so the
+answering call is nearly free.
 
 **Why extraction has no escape hatch.** Letting the extractor reply `NONE` is
 model-dependent and dangerous: one model took that option on **73 %** of inputs where
@@ -106,9 +129,12 @@ repetition wholesale. Gains over the drafter alone: **+9 % prose, +53 % code, +9
 - **Max reasoning effort buys nothing agentic.** `xhigh` gained +7 pts on hard
   knowledge questions (at 6× the tokens and 5.7× the wall clock) but went **0-for-8**
   against `medium` on terminal-agent tasks, losing one.
-- **Don't max the context.** Every search-result truncation from 1200 chars to
-  uncapped found the target fact; latency scaled 3.7 s → 14.1 s. Retrieval quality is
-  in the ranking, not the tail.
+- **Context beyond ~6 k chars/result buys nothing.** Tested on the questions the
+  stack actually *failed* (a single-question test had wrongly suggested 1200 was
+  optimal): cap 1200 → gold reached the extract in 4/11, cap 6000 → 6/11, uncapped
+  → 6/11, with latency 3.7 s → 10.5 s → 14.1 s. Default is **2400** as the
+  compromise; the remaining failures are **search-coverage** misses that no context
+  size fixes.
 - **Thinking does *not* collapse under distractors** (contra the inverse-scaling
   literature, at least for this model): 180/180 on a distractor suite, and it took a
   multi-hop suite from 45/72 to **72/72** for only 18 % more wall clock.
@@ -126,8 +152,8 @@ systemctl --user enable --now llama-server a3b-extractor rts-proxy
 Point your client's OpenAI base URL at `http://127.0.0.1:8090/v1`.
 Single-model mode: set `EXTRACT_ENDPOINT` equal to `ANSWER_ENDPOINT`.
 
-**Config (env):** `SEARCH_MODE=auto|always|off` · `MAX_DOC_CHARS=1200` ·
-`ANSWER_THINK=medium|off|xhigh` · `ANSWER_ENDPOINT` · `EXTRACT_ENDPOINT` · `OLLAMA_KEY`
+**Config (env):** `SEARCH_MODE=auto|always|off` ·
+`ANSWER_THINK=medium|off|xhigh` · `MAX_DOC_CHARS=2400` · `ANSWER_ENDPOINT` · `EXTRACT_ENDPOINT` · `OLLAMA_KEY`
 
 ### Thinking belongs on the answer call only
 Run the answering server with **`-rea off`** and let the proxy opt in per request.

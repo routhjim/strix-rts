@@ -51,4 +51,5 @@ if __name__=="__main__":
     print(f"validating on {N} TriviaQA questions (closed-book q38 baseline was 69.7%)\n")
     if which in ("all","A"): run("A-closedbook",      "http://127.0.0.1:8080", False)
     if which in ("all","B"): run("B-closed+think",    "http://127.0.0.1:8080", True)
-    if which in ("all","C"): run("C-fullstack",       "http://127.0.0.1:8090", False)  # proxy adds think itself
+    if which in ("all","C"): run("C-fullstack",       "http://127.0.0.1:8090", False)  # cross-model: A3B extracts
+    if which in ("all","D"): run("D-singlemodel",     "http://127.0.0.1:8091", False)  # q38 extracts for itself

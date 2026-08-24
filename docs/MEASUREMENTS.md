@@ -65,32 +65,104 @@ QA suite was 180/180 with thinking on. We did not reproduce inverse scaling.
 
 ## End-to-end stack validation (120 TriviaQA questions, public ground truth)
 
-Same questions, three configurations. Alias-match grading against the dataset's
-own answer lists.
+Same 120 questions, four configurations, matched `MAX_DOC_CHARS=2400`, run
+**sequentially** — C and D share the answerer endpoint, so running them
+concurrently would have measured GPU contention instead of architecture.
 
-| arm | accuracy | median latency | total |
-|---|---|---|---|
-| closed-book (no search, no thinking) | 85/120 = **70.8 %** | 0.6 s | 1.4 min |
-| closed-book + thinking medium | 87/120 = **72.5 %** | 2.3 s | 12.4 min |
-| **full stack** (search → extract → answer + thinking) | **105/120 = 87.5 %** | 10.5 s | 22.4 min |
+Graded bidirectionally against the dataset's own alias lists (see
+[the grader note](#grading)); strict-substring scores in parentheses.
 
-**+16.7 points from retrieval.** The middle arm is the control that makes this
-interpretable: **thinking alone bought +1.7 points for 4× the latency**, because
-factual recall is a *knowledge* gap and deliberation cannot invent facts. The
-mirror result appears in the multi-hop suite above, where thinking took 45/72 →
+| arm | accuracy | median | p95 | total |
+|---|---|---|---|---|
+| A closed-book (no search, no thinking) | 88/120 = **73.3 %** (70.8) | 0.6 s | 0.9 s | 1.4 min |
+| B closed-book + thinking medium | 90/120 = **75.0 %** (72.5) | 2.3 s | 21.1 s | 12.4 min |
+| D single-model (q38 extracts for itself) | 104/120 = **86.7 %** (85.0) | 27.3 s | 42.2 s | 56.5 min |
+| **C cross-model** (A3B extracts → q38 answers) | **110/120 = 91.7 %** (88.3) | **11.8 s** | 21.8 s | **24.9 min** |
+
+### Why the cross-model split is the whole design
+
+**C beats D on both axes at once: 2.3× faster *and* +5.0 points more accurate.**
+That is the result worth reproducing, because "add a second model" normally buys
+speed at the cost of fidelity, and here it buys both.
+
+Speed is the expected half — a 3 B-active MoE reads far less memory per token
+than a 27 B dense model, and extraction is the token-heavy call (it ingests all
+six documents; the answer call sees only the extracted spans).
+
+Accuracy is the surprise, and it has a specific mechanism. Paired over the 120:
+
+| | count |
+|---|---|
+| both correct | 101 |
+| **C only** | **9** |
+| D only | 3 |
+| both wrong | 7 |
+
+| | C cross-model | D single-model |
+|---|---|---|
+| sufficiency refusals ("couldn't find a reliable source") | **11/120** | **26/120** |
+| answers citing a retrieved source | **101/120** | 84/120 |
+
+q38 self-extracting **discards evidence it was actually handed** more than twice
+as often, then falls back to parametric memory and misses. Every one of the nine
+C-only wins is this pattern — the fact was verbatim in the retrieved documents:
+
+> *"Which northern English beer was originally launched by Col. James Porter in 1927?"*
+> C: `Newcastle Brown Ale [1]` · D: *"I couldn't find a reliable source confirming
+> this specific detail. From my own knowledge…"*
+
+A big instruction-tuned reasoner reads a raw six-document search dump as a
+question about *trustworthiness*; a small extractor whose only job is span
+extraction just returns the span. Specialising the extractor is not merely a
+cheaper way to do the same work — **it is a more faithful way**, because the
+answerer never sees the noise that triggers its own caution.
+
+### Search vs thinking
+
+**+16.7 points (fair: +18.4) from retrieval.** Arm B is the control that makes
+this interpretable: **thinking alone bought +1.7 points for 4× the latency**,
+because factual recall is a *knowledge* gap and deliberation cannot invent facts.
+The mirror result is in the multi-hop suite above, where thinking took 45/72 →
 72/72 and retrieval was irrelevant.
 
 > **Search fixes knowledge gaps. Thinking fixes reasoning gaps. They are not
 > substitutes, and a router should spend each only where it pays** — which is why
 > the proxy decides them independently rather than tying thinking to search.
 
-Paired inspection: search corrected **17** questions the closed-book model missed and
-**broke 3** — retrieved snippets displacing correct parametric knowledge. That is the
-documented distractor effect appearing in practice, and the reason the sufficiency
-gate exists.
+Paired against closed-book, search corrected **17** questions the model missed and
+**broke 3** — retrieved snippets displacing correct parametric knowledge. That is
+the documented distractor effect in practice, and the reason the sufficiency gate
+exists (and the reason it must not be *too* eager — see D above).
 
-Cost note: 10.5 s median is ~17× a closed-book turn. Auto-routing matters precisely
+Cost note: 11.8 s median is ~20× a closed-book turn. Auto-routing matters precisely
 because it spends that only on turns that need it; a social turn still returns in ~1.3 s.
+
+### Context budget per search result
+
+Measured on the 11 questions the stack actually **failed** — an earlier
+single-question test wrongly suggested 1200 was optimal, because on that question
+every cap worked:
+
+| `MAX_DOC_CHARS` | gold fact reached the extractor | search+extract |
+|---|---|---|
+| 1200 | 4/11 | 3.7 s |
+| 6000 | 6/11 | 10.5 s |
+| uncapped | 6/11 | 14.1 s |
+
+Above ~6000 buys nothing, and the remaining 5 are **search-coverage** failures no
+context size can fix. Default is **2400** as the compromise; raise it to 6000 to
+buy the last ~1.7 points for ~7 s more per search.
+
+### Grading
+
+Scores are reported with a **bidirectional** alias matcher
+([`bench/fairgrade.py`](../bench/fairgrade.py)). The obvious strict test — "is a
+gold alias a substring of the reply?" — rejects correct answers that are *shorter*
+or reordered than the alias: `Eva Cassidy` vs alias `Eva Marie Cassidy`,
+`violin` vs `The Violin`, `The molecular structure of DNA` vs `DNA structure`.
+It also scores the reply's **last** line, since models list candidates before
+committing. This moves every arm up 2–3 points and does not change any ranking;
+strict numbers are kept in parentheses above so both are reproducible.
 
 ## Sparse MoE comparison (DeepSeek-V4-Flash 284B/13B-active, 3-bit pruned)
 

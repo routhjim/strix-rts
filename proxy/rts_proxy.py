@@ -40,7 +40,15 @@ SEARCH_MODE = os.environ.get("SEARCH_MODE", "auto")
 # tokens and 0-for-8 on agentic tasks.
 ANSWER_THINK  = os.environ.get("ANSWER_THINK", "medium")   # medium | off | xhigh
 MIN_SEARCH_CHARS = int(os.environ.get("MIN_SEARCH_CHARS", 12))
-MAX_DOC_CHARS = int(os.environ.get("MAX_DOC_CHARS", 2400))  # per result; 6x2400~=3.6k tok
+MAX_DOC_CHARS = int(os.environ.get("MAX_DOC_CHARS", 2400))
+# Per-result truncation of search content. Measured on the 11 questions the stack
+# actually failed (a single-question test had wrongly suggested 1200 was optimal):
+#   cap 1200 -> gold fact reached the extract in 4/11   (~3.7s search+extract)
+#   cap 6000 -> 6/11                                    (~10.5s)
+#   uncapped -> 6/11                                    (~14.1s)
+# So >6000 buys nothing, and the remaining 5 are SEARCH-COVERAGE failures no
+# context size can fix. 2400 is the default compromise; raise to 6000 if you want
+# the last ~1.7 points of accuracy and can spend ~7s more per search.
 NO_EVIDENCE = "NONE"
 
 def _post_json(url, payload, timeout=600, key=None):
