@@ -6,6 +6,13 @@ LLMs well on a Ryzen AI Max+ 395 (Strix Halo, 128 GB unified LPDDR5X, ~256 GB/s)
 Everything here is measured on one box over a week of controlled A/Bs, including
 the things that **didn't** work. Numbers are reproducible with the harness in `bench/`.
 
+> **On confidence:** this is **n=1 hardware, and most cells are single runs.** The
+> directions are consistent and each has a mechanism behind it, but these are not
+> multi-run means with error bars — treat any individual figure as ±10 % and trust
+> the *ordering* more than the value. Repeat-run spread on identical configs was
+> ~5 %, and speculative decoding shows genuine bimodal draft-alignment basins, so
+> long-context throughput is a distribution, not a point.
+
 ---
 
 ## 1. What the proxy does
