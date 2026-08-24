@@ -122,7 +122,17 @@ Point your client's OpenAI base URL at `http://127.0.0.1:8090/v1`.
 Single-model mode: set `EXTRACT_ENDPOINT` equal to `ANSWER_ENDPOINT`.
 
 **Config (env):** `SEARCH_MODE=auto|always|off` · `MAX_DOC_CHARS=1200` ·
-`ANSWER_ENDPOINT` · `EXTRACT_ENDPOINT` · `OLLAMA_KEY`
+`ANSWER_THINK=medium|off|xhigh` · `ANSWER_ENDPOINT` · `EXTRACT_ENDPOINT` · `OLLAMA_KEY`
+
+### Thinking belongs on the answer call only
+Run the answering server with **`-rea off`** and let the proxy opt in per request.
+Extraction and the sufficiency check stay thinking-off (copy and classify jobs).
+Thinking-medium on the grounded answer is the best accuracy-per-second lever measured
+here: a multi-hop retrieval suite went **45/72 → 72/72 for +18 % wall clock**.
+
+**Do not set the server default to `-rea auto`.** It makes *every* turn think, so a
+short request with a small `max_tokens` spends its whole budget on the reasoning trace
+and returns **empty content** — a silent failure that looks like the model breaking.
 
 If you use Open WebUI, disable its built-in web search — the proxy owns that path now.
 

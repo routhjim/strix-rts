@@ -32,6 +32,13 @@ ANSWER   = os.environ.get("ANSWER_ENDPOINT",  "http://127.0.0.1:8080").rstrip("/
 EXTRACT  = os.environ.get("EXTRACT_ENDPOINT", "http://127.0.0.1:18094").rstrip("/")
 OLLAMA_KEY = os.environ.get("OLLAMA_KEY", "")
 SEARCH_MODE = os.environ.get("SEARCH_MODE", "auto")
+# Thinking on the ANSWER call only. Measured 2026-08-22: thinking=medium took the
+# multi-hop retrieval suite from 45/72 to 72/72 at ALL context lengths for +18%
+# wall clock, and scored 180/180 under hard distractors — no inverse scaling.
+# Extraction/sufficiency stay thinking-OFF: they are copy/classify jobs, and off
+# is faster. xhigh is deliberately NOT used: +7pts on hard knowledge but 6x the
+# tokens and 0-for-8 on agentic tasks.
+ANSWER_THINK  = os.environ.get("ANSWER_THINK", "medium")   # medium | off | xhigh
 MIN_SEARCH_CHARS = int(os.environ.get("MIN_SEARCH_CHARS", 12))
 MAX_DOC_CHARS = int(os.environ.get("MAX_DOC_CHARS", 2400))  # per result; 6x2400~=3.6k tok
 NO_EVIDENCE = "NONE"
@@ -160,6 +167,15 @@ class H(BaseHTTPRequestHandler):
                         f"\n\nQuestion: {user}")
         ans_body = dict(body)
         ans_body["messages"] = msgs[:-1] + [{"role":"user","content":grounded}]
+        if ANSWER_THINK != "off":
+            kw = dict(ans_body.get("chat_template_kwargs") or {})
+            kw.update({"enable_thinking": True, "reasoning_effort": ANSWER_THINK})
+            ans_body["chat_template_kwargs"] = kw
+            ans_body["reasoning_effort"] = ANSWER_THINK
+            # a trace needs room; don't let a small client cap truncate the answer
+            if int(ans_body.get("max_tokens") or 0) < 2048:
+                ans_body["max_tokens"] = 2048
+        print(f"[rts] answering (think={ANSWER_THINK})")
         return self._passthrough(json.dumps(ans_body).encode())
 
 class S(ThreadingMixIn, HTTPServer):

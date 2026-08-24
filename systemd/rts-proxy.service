@@ -9,6 +9,7 @@ Environment=RTS_PORT=8090
 Environment=ANSWER_ENDPOINT=http://127.0.0.1:8080
 Environment=EXTRACT_ENDPOINT=http://127.0.0.1:18094
 Environment=SEARCH_MODE=auto
+Environment=ANSWER_THINK=medium
 Environment=MAX_DOC_CHARS=1200
 EnvironmentFile=%h/.config/rts-proxy.env
 ExecStart=/usr/bin/python3 -u %HOME%/rts-proxy/rts_proxy.py
