@@ -8,7 +8,7 @@ structure of DNA", "violin" vs "The Violin"). This checks both directions plus a
 token-subset test, scored against the reply's final line (models often list
 candidates before committing).
 """
-import json, re, sys
+import json, os, re, sys
 
 STOP = {"the","a","an","of","and","in","on","at","to","for","is","was","by","its","it"}
 
@@ -50,7 +50,8 @@ def score(path, gold):
 
 if __name__ == "__main__":
     gold = {}
-    for l in open("/home/jrouth/models/kbench/trivia.jsonl"):
+    here = os.path.dirname(os.path.abspath(__file__))
+    for l in open(os.environ.get("TRIVIA", os.path.join(here, "trivia.jsonl"))):
         d = json.loads(l)
         gold[d["id"]] = d["aliases"]; gold[d["question"]] = d["aliases"]
     for p in sys.argv[1:]:
