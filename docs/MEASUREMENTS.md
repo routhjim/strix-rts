@@ -24,12 +24,65 @@ Draft acceptance: DFlash2 0.745, MTP 0.685 on prose; 0.61 on reasoning traces
 |---|---|---|
 | freeform | 29.1 | 29.5 |
 | code | 67.5 | **90.2** |
-| long-doc 8.8k (salted) | **30.7** | 15.6 |
-| prefill 8.8k | 253 | 261 |
+| prefill 8.8k | 247 | **257** |
+| long-doc 8.8k (salted) | **33.0** | 20.1 |
 
-ROCm wins where speculation accepts *wide* (batched verify = GEMM, rocBLAS's
-strength) and loses badly at long context. Unexplained; the crater is the open
-question if anyone wants to dig.
+### The long-context gap, isolated
+
+An earlier version of this table reported the salted long-doc row as
+**30.7 vs 15.6** and called the gap "unexplained." That comparison was
+**confounded** — its two arms differed in three ways at once (backend *and*
+drafter *and* llama.cpp version: HIP+MTP on b10433 vs Vulkan+DFlash2 on a PR
+build). Corrected here by holding build and drafter fixed (Q4_K_S, MTP n4 +
+ngram, `-fa on`, `-c 32768 -ub 2048 -np 1`, 3 salted variants × 400 tokens) and
+varying only the backend:
+
+| build | backend | decode median | draft acceptance |
+|---|---|---|---|
+| b10433 | Vulkan | 32.1 | 0.661 |
+| b10433 | ROCm | **15.3** | **0.448** |
+| master f280b26 | Vulkan | 33.0 | 0.595 |
+| master f280b26 | ROCm | **20.1** | **0.769** |
+
+Two separate things were going on.
+
+**One was a numerics bug, and upstream fixed it.** On b10433, ROCm draft
+acceptance was 0.448 against Vulkan's 0.661 — with an identical model, drafter,
+prompt, and `temperature 0`. Acceptance is a numerical property; it should not
+move with the backend. Updating to master takes ROCm to **0.769** and buys
+**+31 % decode**. The likely fix is
+[#26696 `ggml-hip : remove -funsafe-math-optimizations`](https://github.com/ggml-org/llama.cpp/pull/26696) —
+unsafe math on the HIP path was degrading logits enough that a third of the
+drafter's proposals were rejected. Output stayed coherent throughout
+(unique-word ratio 0.54), so this was *silently* wasted work, not visible
+corruption. Vulkan moved 32.1 → 33.0 across the same update, which is the
+control.
+
+**The other is a raw decode deficit, still unexplained.** After the fix, ROCm
+has the *higher* acceptance (0.769 vs 0.595) and still loses by **1.64×**. So
+acceptance cannot be what remains — there is a per-token decode cost on the HIP
+path independent of speculation. It is also far less stable: the three salted
+variants came in at 15.1 / 20.1 / 30.3 on ROCm versus 30.1 / 33.0 / 34.4 on
+Vulkan.
+
+Two hypotheses tested and **rejected**, recorded so nobody re-runs them:
+
+- **rocWMMA flash attention.** Widely recommended for gfx1151 as
+  `GGML_HIP_ROCWMMA_FATTN=ON`. The option does not exist in this lineage — the
+  only trace in b10433 is `// TODO add support for AMD cards via rocWMMA`, and
+  master carries [#26760 `ci: rm GGML_HIP_ROCWMMA_FATTN`](https://github.com/ggml-org/llama.cpp/pull/26760).
+  CMake accepts the flag as an unused variable and reports nothing, so it is
+  easy to believe you enabled it.
+- **The TOP_K sampler CPU fallback.** ROCm really does log `device 'ROCm0' does
+  not have support for op TOP_K` where Vulkan does not, and prefill-fast /
+  decode-slow is the right shape for per-token overhead. But disabling top-k
+  made ROCm *slower* (116.8 vs 121.3 t/s), so it is not the cause.
+
+**Practical upshot: stay on Vulkan for the decode path.** ROCm's ~4 % prefill
+edge holds on both builds but is too small to justify splitting backends across
+the two servers. Note the author of the community's known-good ROCm stack
+[migrated to Vulkan/RADV in July 2026](https://github.com/ggml-org/llama.cpp/discussions/20856)
+for the same reason.
 
 ## Batching (`-np`), DFlash2+ngram vs autoregressive
 
