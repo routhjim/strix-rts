@@ -1,0 +1,6 @@
+*.env
+*.log
+*.gguf
+__pycache__/
+results-*.jsonl
+rts-*.jsonl

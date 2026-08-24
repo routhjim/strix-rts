@@ -1,0 +1,28 @@
+[Unit]
+Description=llama.cpp server - Qwen3.8-27B Q4_K_S + DFlash2+ngram stack (PR-27342 Vulkan)
+# Config validated 2026-08-22: ~29 t/s freeform / 66 code / ~31 longdoc, prefill 253.
+# Mirrors ~/models/run-qwen38.sh defaults (that script stays the experiment entrypoint).
+# Binary is a PINNED build of open PR #27342 (~/llama.cpp-dflash2) — do not rebuild
+# casually; re-evaluate when the PR merges upstream.
+# NOTE: no --mmproj (vision) — untested with the DFlash2+ngram stack; old A3B unit
+# (with vision) is backed up as llama-server.service.a3b.bak.
+After=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=%HOME%/llama.cpp-dflash2/build/bin/llama-server \
+    -m %HOME%/models/Qwen3.8-27B-Q4_K_S.gguf \
+    -md %HOME%/models/dflash2/Qwen3.8-27B-DFlash2-Q4_K_M.gguf -ngld 99 \
+    --spec-type draft-dflash,ngram-mod --spec-ngram-mod-n-min 24 \
+    -ngl 99 -fa on --jinja --reasoning-format deepseek -rea off \
+    --chat-template-file %HOME%/models/qwen38-fixed-template.jinja \
+    -c 65536 -b 4096 -ub 2048 -np 1 \
+    --host 127.0.0.1 --port 8080
+TimeoutStartSec=600
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=10
+OOMScoreAdjust=-100
+
+[Install]
+WantedBy=default.target

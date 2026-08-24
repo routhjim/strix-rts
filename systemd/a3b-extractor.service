@@ -1,0 +1,19 @@
+[Unit]
+Description=Qwen3.6-35B-A3B — RTS extractor (938 t/s prefill; reads long search context)
+After=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=%HOME%/llama.cpp-b10433/build/bin/llama-server \
+    -m %HOME%/models/Qwen3.6-35B-A3B-Q8_0.gguf \
+    --spec-type draft-mtp --spec-draft-n-max 3 \
+    -ngl 99 -fa on --jinja --reasoning-format deepseek -rea off \
+    -c 65536 -b 4096 -ub 2048 -np 1 \
+    --host 127.0.0.1 --port 18094
+TimeoutStartSec=600
+Restart=on-failure
+RestartSec=10
+OOMScoreAdjust=-100
+
+[Install]
+WantedBy=default.target
