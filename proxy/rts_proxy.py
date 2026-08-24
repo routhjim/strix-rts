@@ -92,15 +92,53 @@ def sufficient(query, evidence, ep):
         f"Does the evidence above actually answer the question? Reply YES or NO."}], 8)
     return v.strip().upper().startswith("Y")
 
+REASONING_RE = re.compile(r"\b(calculate|compute|prove|derive|solve|how many|how much|"
+    r"what is the (sum|product|difference|derivative|integral|value)|step by step|"
+    r"why does|explain why|reason|infer|deduce|compare|which is (larger|bigger|smaller|faster|older)|"
+    r"algorithm|complexity|debug|refactor|implement|write (a|the) (function|program|script|code)|"
+    r"equation|proof|theorem)\b", re.I)
+MATHY_RE = re.compile(r"\d\s*[-+*/^=]\s*\d|\b\d+\s*(mph|km/h|kg|%|hours?|minutes?)\b", re.I)
+
+# Chatty turns only — everything else gets thinking. Regex INTENT detection proved
+# leaky (missed "write a python function"), so the default is inverted: thinking is
+# ON unless the turn is clearly social/trivial. Measured basis: thinking costs ~18%
+# wall clock on retrieval answers and never lowered accuracy in any suite we ran,
+# so a false-positive is cheap and a false-negative loses up to +46.7% recovery.
+CHATTY_RE = re.compile(r"^(hi|hey|hello|thanks?|thank you|ty|ok(ay)?|got it|cool|nice|"
+                       r"yes|no|yep|nope|sure|please|bye|good (morning|night)|lol|haha)"
+                       r"[\s!.,:;)-]*$", re.I)
+
+def wants_thinking(text):
+    if ANSWER_THINK == "off": return False
+    t = (text or "").strip()
+    if len(t) < MIN_SEARCH_CHARS or CHATTY_RE.match(t): return False
+    return True
+
 def wants_search(text):
     if SEARCH_MODE == "off": return False
     if SEARCH_MODE == "always": return len(text.strip()) >= 1
     # auto: skip trivial/chatty turns; search substantive info-seeking ones
     t = text.strip()
     if len(t) < MIN_SEARCH_CHARS: return False
-    if re.search(r"\b(who|what|when|where|which|why|how|latest|current|price|news|"
-                 r"today|compare|vs\.?|release|version|score|benchmark)\b", t, re.I): return True
+    # self-contained reasoning/code problems need no external facts
+    if REASONING_RE.search(t) and not re.search(r"\b(latest|current|today|news|price|"
+            r"release|version|who is|who won|when did|when was)\b", t, re.I):
+        return False
+    if re.search(r"\b(who|what|when|where|which|latest|current|price|news|"
+                 r"today|release|version|score|benchmark|according to)\b", t, re.I): return True
     return t.endswith("?")
+
+def _with_thinking(b):
+    """Turn thinking on for a request and guarantee the trace has room. A small
+    client max_tokens plus a reasoning trace = empty content (silent failure)."""
+    if ANSWER_THINK == "off": return b
+    kw = dict(b.get("chat_template_kwargs") or {})
+    kw.update({"enable_thinking": True, "reasoning_effort": ANSWER_THINK})
+    b["chat_template_kwargs"] = kw
+    b["reasoning_effort"] = ANSWER_THINK
+    if int(b.get("max_tokens") or 0) < 2048:
+        b["max_tokens"] = 2048
+    return b
 
 # ---- HTTP ----
 class H(BaseHTTPRequestHandler):
@@ -138,6 +176,12 @@ class H(BaseHTTPRequestHandler):
         msgs = body.get("messages", [])
         user = next((m["content"] for m in reversed(msgs) if m.get("role")=="user"), "")
         if not isinstance(user, str) or not wants_search(user):
+            # no search — but still think if the turn is reasoning-shaped
+            if isinstance(user, str) and wants_thinking(user):
+                nb = _with_thinking(dict(body))
+                print(f"[rts] no-search, think={ANSWER_THINK}")
+                return self._passthrough(json.dumps(nb).encode())
+            print("[rts] no-search, no-think (passthrough)")
             return self._passthrough(raw)
 
         # RTS path
@@ -167,15 +211,9 @@ class H(BaseHTTPRequestHandler):
                         f"\n\nQuestion: {user}")
         ans_body = dict(body)
         ans_body["messages"] = msgs[:-1] + [{"role":"user","content":grounded}]
-        if ANSWER_THINK != "off":
-            kw = dict(ans_body.get("chat_template_kwargs") or {})
-            kw.update({"enable_thinking": True, "reasoning_effort": ANSWER_THINK})
-            ans_body["chat_template_kwargs"] = kw
-            ans_body["reasoning_effort"] = ANSWER_THINK
-            # a trace needs room; don't let a small client cap truncate the answer
-            if int(ans_body.get("max_tokens") or 0) < 2048:
-                ans_body["max_tokens"] = 2048
-        print(f"[rts] answering (think={ANSWER_THINK})")
+        # grounded answers ALWAYS think: measured 45/72 -> 72/72 on multi-hop
+        ans_body = _with_thinking(ans_body)
+        print(f"[rts] answering grounded (think={ANSWER_THINK})")
         return self._passthrough(json.dumps(ans_body).encode())
 
 class S(ThreadingMixIn, HTTPServer):

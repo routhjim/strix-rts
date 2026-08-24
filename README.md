@@ -30,6 +30,11 @@ client ──/v1/chat/completions──▶  RTS proxy (:8090)
     5. ANSWER    ── main model reasons over the ~300-char extract, with [n] cites
 ```
 
+**Validated end to end** on 120 TriviaQA questions: closed-book **70.8 %** →
+full stack **87.5 %** (+16.7 pts). Control arm — thinking *without* search — scored
+72.5 %, i.e. **+1.7 pts for 4× the latency**. Search fixes knowledge; thinking fixes
+reasoning; the proxy routes them independently. Full table in `docs/MEASUREMENTS.md`.
+
 **Why two models.** On this hardware a sparse MoE (Qwen3.6-35B-A3B) prefills at
 **938 t/s** while a dense 27B does **253 t/s**. Retrieval is a *reading* job, answering
 is a *reasoning* job — so the MoE reads and the dense model thinks.

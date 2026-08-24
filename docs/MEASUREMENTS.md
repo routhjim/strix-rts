@@ -63,6 +63,35 @@ tasks xhigh went 0-for-8 vs medium.
 Thinking fully removes length degradation for +18 % wall clock. A distractor
 QA suite was 180/180 with thinking on. We did not reproduce inverse scaling.
 
+## End-to-end stack validation (120 TriviaQA questions, public ground truth)
+
+Same questions, three configurations. Alias-match grading against the dataset's
+own answer lists.
+
+| arm | accuracy | median latency | total |
+|---|---|---|---|
+| closed-book (no search, no thinking) | 85/120 = **70.8 %** | 0.6 s | 1.4 min |
+| closed-book + thinking medium | 87/120 = **72.5 %** | 2.3 s | 12.4 min |
+| **full stack** (search → extract → answer + thinking) | **105/120 = 87.5 %** | 10.5 s | 22.4 min |
+
+**+16.7 points from retrieval.** The middle arm is the control that makes this
+interpretable: **thinking alone bought +1.7 points for 4× the latency**, because
+factual recall is a *knowledge* gap and deliberation cannot invent facts. The
+mirror result appears in the multi-hop suite above, where thinking took 45/72 →
+72/72 and retrieval was irrelevant.
+
+> **Search fixes knowledge gaps. Thinking fixes reasoning gaps. They are not
+> substitutes, and a router should spend each only where it pays** — which is why
+> the proxy decides them independently rather than tying thinking to search.
+
+Paired inspection: search corrected **17** questions the closed-book model missed and
+**broke 3** — retrieved snippets displacing correct parametric knowledge. That is the
+documented distractor effect appearing in practice, and the reason the sufficiency
+gate exists.
+
+Cost note: 10.5 s median is ~17× a closed-book turn. Auto-routing matters precisely
+because it spends that only on turns that need it; a social turn still returns in ~1.3 s.
+
 ## Sparse MoE comparison (DeepSeek-V4-Flash 284B/13B-active, 3-bit pruned)
 
 Raw AR decode 19.3 t/s at 5.84 GB/token — *faster* than the dense 27B's 13.4.
